@@ -4,15 +4,18 @@ import numpy
 import random
 import time
 import matplotlib.pyplot as plt
+import cProfile
+from pstats import Stats, SortKey
 
 matrix = []
 matrix_cst = []
-upper_bound = 7000
-max_points = 200
+upper_bound = 5000
+max_points = 130
+
 
 class VRPGenome:
 
-    # __slots__ = ['nb_pts', 'predecessors', 'genome', 'fitness']
+    __slots__ = ['nb_pts', 'predecessors', 'genome', 'fitness']
 
     def __init__(self, genome: list[int] = None) -> None:
         self.nb_pts = len(matrix)
@@ -32,7 +35,7 @@ class VRPGenome:
             constraint: int = 0
             cost = 0
             j = i
-            while (j < self.nb_pts) and (constraint <= upper_bound) and (j-i+1 <= max_points):
+            while (j < self.nb_pts) and (j-i+1 <= max_points) and (constraint <= upper_bound):
                 if (i == j):
                     constraint = matrix_cst[0][self.genome[j-1]] + matrix_cst[self.genome[j-1]][0]
                     cost = matrix[0][self.genome[j-1]] + matrix[self.genome[j-1]][0]
@@ -40,7 +43,7 @@ class VRPGenome:
                     cost += - matrix[self.genome[j-2]][0] + matrix[self.genome[j-2]][self.genome[j-1]] + matrix[self.genome[j-1]][0]
                     constraint += - matrix_cst[self.genome[j-2]][0] + matrix_cst[self.genome[j-2]][self.genome[j-1]] + matrix_cst[self.genome[j-1]][0]
 
-                if (constraint <= upper_bound) and (j-i+1 <= max_points):
+                if (j-i+1 <= max_points) and (constraint <= upper_bound):
                     if (values[i-1] + cost < values[j]):
                         values[j] = values[i-1] + cost
                         self.predecessors[j] = i-1
@@ -63,12 +66,6 @@ class VRPGenome:
             j = i
         return tournees
 
-#     __slots__  = []
-
-
-# definir __gt__ et eq etc pour pouvoir faire le sort sur la pop
-
-
 class GeneticAlgorithmVRP:
     """Cet algo permet de trouver une solution au problème de VRP (Vehicle
     Routing Problem) qui consiste à trouver les meilleures tournées de
@@ -79,6 +76,7 @@ class GeneticAlgorithmVRP:
     https://doi.org/10.1016/S0305-0548(03)00158-8"""
 
     def __init__(self) -> None:
+        self.start = time.time()
         self.population: list[VRPGenome] = []
         self.productive_iter = 0
         self.unprod_iter = 0
@@ -86,7 +84,7 @@ class GeneticAlgorithmVRP:
         self.pop_size = 30
         self.max_prod_iter = 10000
         self.max_unprod_iter = 3000
-        self.spacement = 1
+        self.spacement = 5
         self.replacement = 8
         self.genome_size = len(matrix) - 1
 
@@ -96,14 +94,14 @@ class GeneticAlgorithmVRP:
         self.tournees = []
         self.nonServis = []
   
-    '''/**
-     * Prétraitement et initilisation.
-     * On regarde si tous les points peuvent être servis, si ce n'est pas le cas
-     * à cause du maxDistance alors on les met dans nonServis et on modifie les 
-     * temps et distances pour les mettre à la même valeur que s'ils étaient 
-     * confondus avec le dépôt. A la fin on les enlevera de la solution.
-     */'''
+
     def init(self) -> bool:
+        """Prétraitement et initilisation.
+        On regarde si tous les points peuvent être servis, si ce n'est pas le cas
+        à cause du maxDistance alors on les met dans nonServis et on modifie les 
+        temps et distances pour les mettre à la même valeur que s'ils étaient 
+        confondus avec le dépôt. A la fin on les enlevera de la solution."""
+
         for i in range(1, len(matrix_cst)):
             if (matrix_cst[0][i] + matrix_cst[i][0] > upper_bound):
                 self.nonServis.append(i)
@@ -118,17 +116,15 @@ class GeneticAlgorithmVRP:
     
         return len(self.nonServis) != self.genome_size
   
-    '''
-     * Crée une population initiale aléatoire. On essaie d'utiliser des heuristiques
-     * pour avoir des solutions correctes dès le début.
-    '''
-    def generateRandomPop(self) -> None:
-        CW = self.clarkAndWright()
-        print("| Fitness CW :", CW.fitness)
-        self.population.append(CW)
 
-        '''Il faudrait rajouter 2 autres heuristiques pour avoir une
-        bonne population de départ.'''
+    def generateRandomPop(self) -> None:
+        """Crée une population initiale aléatoire. On essaie d'utiliser des heuristiques
+        pour avoir des solutions correctes dès le début."""
+        clarke_wright = self.clarkAndWright()
+        print("| Fitness CW :", clarke_wright.fitness)
+        self.population.append(clarke_wright)
+
+        # Il faudrait rajouter 2 autres heuristiques pour avoir une bonne population de départ.
 
         g = self.greedy()
         self.population.append(g)
@@ -140,41 +136,38 @@ class GeneticAlgorithmVRP:
                 self.population.append(indiv)
 
         self.population.sort(key=lambda x: x.fitness)
-  
-    '''    /**
-     * Utile pour Clarke & Wwright, permet de retrouver la tournée à laquelle
-     * appartient i.
-     */'''
+
     def findRoute(self, tournees, i: int) -> int:
+        """Utile pour Clarke & Wright, permet de retrouver la tournée à laquelle appartient i."""
+
         route = -1
         for tour in range(len(tournees)):
             if i in tournees[tour]['points']:
                 route = tour
         return route
-  
-    '''/**
-     * Heuristique de Clarke & Wright permettant d'avoir une bonne population 
-     * de départ. Elle se base sur l'idée du "saving" : savings contient un 
-     * tableau de trip: un point A, un point B et une valeur : le "saving". 
-     * Cette valeur représente la différente entre (A, dépôt)->(dépôt, B) et (A,B). 
-     * Plus cette valeur est grande plus il sera intéressant de passer par A puis 
-     * directement par B plutôt que de repasser par le dépôt entre deux.
-     * On essaie donc itérativement, en partant de tournées ne contenant qu'un 
-     * point, de leur ajouter les chemins de plus grand saving.
-     */'''
+
     def clarkAndWright(self) -> VRPGenome:
+        """Heuristique de Clarke & Wright permettant d'avoir une bonne population
+        de départ. Elle se base sur l'idée du "saving" : savings contient un
+        tableau de trip: un point A, un point B et une valeur : le "saving".
+        Cette valeur représente la différente entre (A, dépôt)->(dépôt, B) et (A,B).
+        Plus cette valeur est grande plus il sera intéressant de passer par A puis
+        directement par B plutôt que de repasser par le dépôt entre deux.
+        On essaie donc itérativement, en partant de tournées ne contenant qu'un
+        point, de leur ajouter les chemins de plus grand saving."""
+
         tournees = [] # list of dict
         savings = []
 
-        for i in range(len(matrix_cst) -1):
-            for j in range(i+1, len(matrix_cst)):
+        for i in range(len(matrix) -1):
+            for j in range(i+1, len(matrix)):
                 if i != 0 and j != 0:
                     savings.append((i,j,
-                        matrix_cst[i][0] +
-                        matrix_cst[0][j] -
-                        matrix_cst[i][j]))
+                        matrix[i][0] +
+                        matrix[0][j] -
+                        matrix[i][j]))
             tournees.append({
-                'distance': matrix_cst[0][i+1] + matrix_cst[i+1][0], 
+                'distance': matrix[0][i+1] + matrix[i+1][0], 
                 'points': [i+1]})
 
         savings.sort(key=lambda x:x[2], reverse=True)
@@ -190,7 +183,9 @@ class GeneticAlgorithmVRP:
                 tournees[routeI]['distance'] += tournees[routeJ]['distance']
                 tournees[routeI]['distance'] -= savings[0][2]
                 tournees.pop(routeJ)
-            savings.pop(0)
+                savings = [(i,j,k) for (i,j,k) in savings if (i != savings[0][0]) and (j != savings[0][1])]
+            if len(savings) > 0:
+                savings.pop(0)
         
         res = [k for x in tournees for k in x['points']]
         return VRPGenome(res)
@@ -201,21 +196,21 @@ class GeneticAlgorithmVRP:
     #  */
     def greedy(self) -> VRPGenome:
         gene: list[int] = []
-        min = sys.maxsize
+        mini = sys.maxsize
         argmin = -1
         for i in range(len(matrix)):
             if i != 0:
-                if matrix[0][i] < min:
-                    min = matrix[0][i]
+                if matrix[0][i] < mini:
+                    mini = matrix[0][i]
                     argmin = i
         gene.append(argmin)
     
         for j in range(len(matrix) -2):
-            min = sys.maxsize
+            mini = sys.maxsize
             for i in range(len(matrix)):
                 if (i != 0) and (i != j) and (i not in gene):
-                    if (matrix[j][i] < min):
-                        min = matrix[j][i]
+                    if (matrix[j][i] < mini):
+                        mini = matrix[j][i]
                         argmin = i
             gene.append(argmin)
         return VRPGenome(gene)
@@ -308,14 +303,12 @@ class GeneticAlgorithmVRP:
             return children[0]
         return children[1]
     
-  
-    # /**
-    #  * On tente d'échanger l'enfant avec un mauvais individu (i.e. qui était 
-    #  * dans la deuxième moitié de la population). Si l'enfant est meilleur on
-    #  * le remplace et on a réussi une itération. On en profite pour faire la
-    #  * mutation ici.
-    #  */
+
     def tradingChildWithBadElement(self, child: VRPGenome) -> None:
+        """On tente d'échanger l'enfant avec un mauvais individu (i.e. qui était 
+        dans la deuxième moitié de la population). Si l'enfant est meilleur on
+        le remplace et on a réussi une itération. On en profite pour faire la
+        mutation ici."""
         rank = random.randint(len(self.population)/2, len(self.population) - 1)
         mutant = child
     
@@ -333,23 +326,20 @@ class GeneticAlgorithmVRP:
             
             self.replaceAndSort(rank, mutant)
 
-  
-    # /**
-    #  * Cette méthode renvoie vrai si element qu'on cherche à faire rentrer
-    #  * dans la population est assez espacé des autres solutions. Cela permet 
-    #  * une hétérogénéité de la population pour éviter de converger trop rapidement
-    #  * dans un minimum local.
-    #  */
+
     def spaced(self, population: list[VRPGenome], individu: VRPGenome, skipped = None) -> bool:
+        """Cette méthode renvoie vrai si element qu'on cherche à faire rentrer
+        dans la population est assez espacé des autres solutions. Cela permet 
+        une hétérogénéité de la population pour éviter de converger trop rapidement
+        dans un minimum local."""
         for pop in range(len(population)):
             if (pop != skipped) and (math.floor(population[pop].fitness/self.spacement) == math.floor(individu.fitness/self.spacement)):
                 return False
         return True
   
-    # /**
-    #  * Pour aider l'algo on remplace quelques mauvais individus par de nouveaux
-    #  */
+
     def partialReplacement(self) -> None:
+        """Pour aider l'algo on remplace quelques mauvais individus par de nouveaux"""
         newPop: list[VRPGenome] = []
         # On genere une population bien espacée
         while (len(newPop) < self.replacement):
@@ -360,7 +350,7 @@ class GeneticAlgorithmVRP:
         for new_indiv in newPop:
         # si l'individu est meilleur que le pire de la population on le remplace
         # sinon on le croise avec tous les individus et on garde le meilleur enfant
-            if (new_indiv.fitness< self.population[-1].fitness):
+            if (new_indiv.fitness < self.population[-1].fitness):
                 self.replaceAndSort(-1, new_indiv)
                 self.unprod_iter = 0
             else:
@@ -373,12 +363,12 @@ class GeneticAlgorithmVRP:
                     self.replaceAndSort(-1, child)
                     self.unprod_iter = 0
 
-    # /**
-    #  * Permet de retirer un élément de la liste et de le remplacer
-    #  * par un autre mais au bon endroit. Petite optimisation permettant
-    #  * d'avoir toujours une liste triée sans la retriée entièrement.
-    #  */
+
     def replaceAndSort(self, rank: int, val: VRPGenome) -> None:
+        """Permet de retirer un élément de la liste et de le remplacer
+        par un autre mais au bon endroit. Petite optimisation permettant
+        d'avoir toujours une liste triée sans la retriée entièrement.
+        """
         self.population.pop(rank)
         i = 0
         while (i < len(self.population) and self.population[i].fitness < val.fitness):
@@ -386,7 +376,7 @@ class GeneticAlgorithmVRP:
         self.population.insert(i, val)
     
   
-    def optimizeVRP(self) -> None:
+    def optimizeVRP(self) -> VRPGenome:
         if not self.init():
             print('Problème init()')
             exit()
@@ -413,34 +403,76 @@ class GeneticAlgorithmVRP:
 
             values.append(self.population[0].fitness)
 
-        print("Prod iter : ", self.productive_iter, " / Unprod iter : ", self.unprod_iter)
-        print("Best : ", self.population[0].fitness)
-        sol = self.population[0].get_path()
-        print(len(values))
-        plt.plot(values)
-        plt.ylabel('Meilleur genome')
-        plt.xlabel('Iteration')
-        plt.show()
-        print(sol)
+        print(f'Itérations :      {len(values)} ({self.productive_iter}/{self.unprod_iter})')
+        print(f'Solution finale : {round(self.population[0].fitness, 2)} mètres')
+        print(f'Temps total :     {round((time.time() - self.start)*100)/100} secondes')
         print("------")
+        # v = list(set(values))
+        # v.sort(reverse=True)
+        # print("Valeurs différentes dans values : ", v)
+
+        # plt.plot(values)
+        # plt.ylabel('Meilleur genome')
+        # plt.xlabel('Iteration')
+        # plt.show()
+        return self.population[0]
+
 
 if __name__ == '__main__':
-    size = 30
-    matrix = numpy.random.randint(0, 50, (size,size))
-    matrix_cst = numpy.random.randint(0, 50, (size,size))
-    matrix = matrix + matrix.T
-    matrix_cst = matrix_cst + matrix_cst.T
-    for i in range(size):
-    	matrix[i][i] = 0
-    	matrix_cst[i][i] = 0
-    matrix_cst = matrix_cst.tolist()
-    matrix = matrix.tolist()
+    size = 20
 
+    # xs = [0] + [random.randint(-250, 250) for x in range(size)]
+    # ys = [0] + [random.randint(-250, 250) for x in range(size)]
+    # matrix = [[math.sqrt(x*x + y*y) for x in xs] for y in ys]
+    # matrix_cst = [[0 for x in xs] for y in ys]
     # print(matrix)
     # print(matrix_cst)
+    # print(xs)
+    # print(ys)
 
-    start = time.time()
+    xs = [0, -25, 114, 17, -9, 53, 221, -131, 125, 69, 22, -240, 204, 145, -45, -121, -108, 53, 135, -215, -219]
+    ys = [0, 41, -72, 93, -139, -204, -201, -24, -118, -177, -101, -164, 223, 182, 120, 138, 89, 199, -73, -116, -182]
+    matrix = [[math.sqrt((xs[x] - xs[y])**2 + (ys[x] - ys[y])**2) for x in range(len(xs))] for y in range(len(ys))]
+    matrix_cst = [[0 for x in xs] for y in ys]
+
+    # fig, ax = plt.subplots()
+    # ax.scatter(x=xs, y=ys)
+    # for i in range(size + 1):
+    #     ax.annotate(i, (xs[i], ys[i]))
+
+    # plt.plot(0, 0, 'ro')
+    # plt.ylabel('Y')
+    # plt.xlabel('X')
+
     vrai = GeneticAlgorithmVRP()
-    vrai.optimizeVRP()
-    print(f"Temps total : {round((time.time() - start)*100)/100} secondes")
-    print()
+    opt = vrai.optimizeVRP()
+
+    # for a in opt.get_path():
+    #     color = (random.random(), random.random(), random.random())
+    #     plt.plot([0, xs[a[0]]], [0, ys[a[0]]], c=color)
+    #     for b in range(len(a) -1):
+    #         plt.plot([xs[a[b]], xs[a[b+1]]], [ys[a[b]], ys[a[b+1]]], c=color)
+    #     plt.plot([0, xs[a[-1]]], [0, ys[a[-1]]], c=color)
+
+    # plt.title(f'{len(opt.get_path())} tournées : {opt.get_path()} (val = {round(opt.fitness, 2)})')
+    # plt.show()
+    
+
+    # start = time.time()
+    # vrai = GeneticAlgorithmVRP()
+    # vrai.optimizeVRP()
+    # print(f"Temps total : {round((time.time() - start)*100)/100} secondes")
+    # print()
+
+    # with cProfile.Profile() as pr:
+    #     start = time.time()
+    #     vrai = GeneticAlgorithmVRP()
+    #     vrai.optimizeVRP()
+    #     print(f"Temps total : {round((time.time() - start)*100)/100} secondes")
+
+    # with open('profiling_stats.txt', 'w') as stream:
+    #     stats = Stats(pr, stream=stream)
+    #     stats.strip_dirs()
+    #     stats.sort_stats('time')
+    #     stats.dump_stats('.prof_stats')
+    #     stats.print_stats()
