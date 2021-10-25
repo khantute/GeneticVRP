@@ -10,7 +10,7 @@ from pstats import Stats, SortKey
 matrix = []
 matrix_cst = []
 upper_bound = 5000
-max_points = 130
+max_points = 6
 
 
 class VRPGenome:
@@ -62,7 +62,7 @@ class VRPGenome:
             i = self.predecessors[j]
             for k in range(i+1, j+1):
                 tour.append(self.genome[k-1])
-            tournees.append(tour)
+            tournees.insert(0, tour)
             j = i
         return tournees
 
@@ -82,8 +82,8 @@ class GeneticAlgorithmVRP:
         self.unprod_iter = 0
         self.mutation_rate = 0.1
         self.pop_size = 30
-        self.max_prod_iter = 10000
-        self.max_unprod_iter = 3000
+        self.max_prod_iter = 8000
+        self.max_unprod_iter = 700
         self.spacement = 5
         self.replacement = 8
         self.genome_size = len(matrix) - 1
@@ -115,18 +115,22 @@ class GeneticAlgorithmVRP:
                 matrix_cst[idx][non] = matrix_cst[idx][0]
     
         return len(self.nonServis) != self.genome_size
-  
 
     def generateRandomPop(self) -> None:
         """Crée une population initiale aléatoire. On essaie d'utiliser des heuristiques
         pour avoir des solutions correctes dès le début."""
-        clarke_wright = self.clarkAndWright()
+
+        clarke_wright = self.localSearch(self.clarkAndWright())
         print("| Fitness CW :", clarke_wright.fitness)
         self.population.append(clarke_wright)
 
+        clarke_wright_bis = self.localSearch(self.clarkAndWrightBis())
+        print("| Fitness CW bis :", clarke_wright_bis.fitness)
+        self.population.append(clarke_wright_bis)
+
         # Il faudrait rajouter 2 autres heuristiques pour avoir une bonne population de départ.
 
-        g = self.greedy()
+        g = self.localSearch(self.greedy())
         self.population.append(g)
         print("| Fitness Greedy :", g.fitness)
 
@@ -142,7 +146,7 @@ class GeneticAlgorithmVRP:
 
         route = -1
         for tour in range(len(tournees)):
-            if i in tournees[tour]['points']:
+            if i in tournees[tour]:
                 route = tour
         return route
 
@@ -155,6 +159,36 @@ class GeneticAlgorithmVRP:
         directement par B plutôt que de repasser par le dépôt entre deux.
         On essaie donc itérativement, en partant de tournées ne contenant qu'un
         point, de leur ajouter les chemins de plus grand saving."""
+
+        tournees = [] # list of dict
+        savings = []
+
+        for i in range(len(matrix) -1):
+            for j in range(i+1, len(matrix)):
+                if i != 0 and j != 0:
+                    savings.append((i,j,
+                        matrix[i][0] +
+                        matrix[0][j] -
+                        matrix[i][j]))
+            tournees.append([i+1])
+
+        savings.sort(key=lambda x:x[2], reverse=True)
+
+        while (len(savings) > 0):
+            routeI = self.findRoute(tournees, savings[0][0])
+            routeJ = self.findRoute(tournees, savings[0][1])
+            if (routeI != routeJ and (len(tournees[routeI]) + len(tournees[routeJ]) + 1 <= max_points)):
+                tournees[routeI].extend(tournees[routeJ])
+                tournees.pop(routeJ)
+                #savings = [(i,j,k) for (i,j,k) in savings if (i != savings[0][0]) and (j != savings[0][1])]
+            if len(savings) > 0:
+                savings.pop(0)
+        
+        res = [k for x in tournees for k in x]
+        return VRPGenome(res)
+
+    def clarkAndWrightBis(self) -> VRPGenome:
+        """Heuristique de Clarke & Wright avec modif"""
 
         tournees = [] # list of dict
         savings = []
@@ -189,12 +223,10 @@ class GeneticAlgorithmVRP:
         
         res = [k for x in tournees for k in x['points']]
         return VRPGenome(res)
-  
-    # /**
-    #  * Algorithme glouton qui retourne un chromosome. Récursivement on choisit un 
-    #  * point, puis le plus proche de celui-ci etc
-    #  */
+
     def greedy(self) -> VRPGenome:
+        """Algorithme glouton qui retourne un chromosome. Récursivement on choisit un 
+        point, puis le plus proche de celui-ci etc"""
         gene: list[int] = []
         mini = sys.maxsize
         argmin = -1
@@ -214,20 +246,16 @@ class GeneticAlgorithmVRP:
                         argmin = i
             gene.append(argmin)
         return VRPGenome(gene)
-  
-    '''/**
-     * Permet d'extraire n éléments aléatoires d'une liste.
-     */'''
+
     def getRandElements(self, genomes: list[VRPGenome], n: int) -> list[VRPGenome]:
+        """Permet d'extraire n éléments aléatoires d'une liste."""
         rand_genome = [x for x in range(len(genomes))]
         random.shuffle(rand_genome)
         return [genomes[k] for k in rand_genome[:n]]
-  
-    # /**
-    #  * Meme principe que pour crossoverOneCut() mais avec deux points : i et j
-    #  * C1[i ... j] = P1[i ... j] puis complété par les valeurs de P2 circulairement à partir de j+1
-    #  */
+
     def crossoverVrpTwoCuts(self, parents: list[VRPGenome]) -> list[VRPGenome]:
+        """Meme principe que pour crossoverOneCut() mais avec deux points : i et j
+        C1[i ... j] = P1[i ... j] puis complété par les valeurs de P2 circulairement à partir de j+1"""
         break1 = random.randint(0, self.genome_size)
         break2 = break1 + random.randint(0, self.genome_size - break1)
         
@@ -252,13 +280,11 @@ class GeneticAlgorithmVRP:
             iter2 += 1
 
         return [VRPGenome(C1), VRPGenome(C2)]
-    
-    # /**
-    #  * Méthode de recherche locale. Etant donné un chemin entre tous les points, le but de
-    #  * cet algo est de retourner la meilleure permutation possible entre 2 arêtes. Pour ça 
-    #  * on prend une partie du chemin et on la "retourne" (c'est équivalent).
-    #  */
+
     def twoOpt(self, individu: VRPGenome) -> VRPGenome:
+        """Méthode de recherche locale. Etant donné un chemin entre tous les points, le but de
+        cet algo est de retourner la meilleure permutation possible entre 2 arêtes. Pour ça 
+        on prend une partie du chemin et on la "retourne" (c'est équivalent)."""
         best = individu
         for i in range(self.genome_size - 1):
             for j in range(i+1, self.genome_size):
@@ -272,37 +298,141 @@ class GeneticAlgorithmVRP:
                 if (current.fitness < best.fitness):
                     best = current
         return best
-    
-  
-    # /**
-    #  * Cette méthode renvoit 2 individus qui vont servir pour le crossover. 
-    #  * Chaque individu est choisi par la méthode dite "du tournoi" : on 
-    #  * choisit alétoirement 2 individus parmi toute la population et on 
-    #  * retourne le meilleur. Idem pour le deuxième.
-    #  */
+
+    def localSearch(self, individu: VRPGenome) -> VRPGenome:
+        """Défini la mutation en 9 étapes simples : soient x et y les successeurs de u et v dans leur
+        tournées respectives ([[...], [..., u, x, ...], ... [..., v, y, ...]]). Ces points peuvent
+        appartenir à la même tournée ou à des différentes et un point peut être le dépôt."""
+
+        best_fit = individu.fitness
+        best_gen = individu.genome[:]
+        for u in range(len(individu.genome) -2):
+            x = u+1
+            for v in range(u+1, len(individu.genome) -1):
+                y = v+1
+                while True:
+                    # M1 : If u is a client node, remove u then insert it after v,
+                    gen = best_gen[:]
+                    a = gen.pop(u)
+                    gen.insert(v+1, a)
+                    current_fit = VRPGenome(gen).fitness
+                    if best_fit > current_fit:
+                        best_fit = current_fit
+                        best_gen = gen[:]
+                        #print("M1 :", VRPGenome(best_gen).get_path(), best_fit)
+                        continue
+
+                    # M2 : If u and x are clients, remove them then insert (u;x) after v
+                    gen = best_gen[:]
+                    b = gen.pop(x)
+                    a = gen.pop(u)
+                    gen.insert(v+1, a)
+                    gen.insert(v+2, b)
+                    current_fit = VRPGenome(gen).fitness
+                    if best_fit > current_fit:
+                        best_fit = current_fit
+                        best_gen = gen[:]
+                        #print("M2 :", VRPGenome(best_gen).get_path(), best_fit)
+
+                    # M3 : If u and x are clients, remove them then insert (x;u) after v
+                    gen = best_gen[:]
+                    b = gen.pop(x)
+                    a = gen.pop(u)
+                    gen.insert(v+1, b)
+                    gen.insert(v+2, a)
+                    current_fit = VRPGenome(gen).fitness
+                    if best_fit > current_fit:
+                        best_fit = current_fit
+                        best_gen = gen[:]
+                        #print("M3 :", VRPGenome(best_gen).get_path(), best_fit)
+                        continue
+
+                    # M4 : If u and v are clients, swap u and v
+                    gen = best_gen[:]
+                    gen[u], gen[v] = gen[v], gen[u]
+                    current_fit = VRPGenome(gen).fitness
+                    if best_fit > current_fit:
+                        best_fit = current_fit
+                        best_gen = gen[:]
+                        #print("M4 :", VRPGenome(best_gen).get_path(), best_fit)
+                        continue
+
+                    # M5 : If u, x and v are clients, swap (u,x) and v
+                    gen = best_gen[:]
+                    gen[u], gen[v] = gen[v], gen[u]
+                    a = gen.pop(x)
+                    gen.insert(v+1, a)
+                    current_fit = VRPGenome(gen).fitness
+                    if best_fit > current_fit:
+                        best_fit = current_fit
+                        best_gen = gen[:]
+                        #print("M5 :", VRPGenome(best_gen).get_path(), best_fit)
+                        continue
+
+                    # M6 : If (u;x) and (v;y) are clients, swap (u;x) and (v;y)
+                    if x != v and u != y:
+                        gen = best_gen[:]
+                        gen[u], gen[x], gen[v], gen[y] = gen[v], gen[y], gen[u], gen[x]
+                        current_fit = VRPGenome(gen).fitness
+                        if best_fit > current_fit:
+                            best_fit = current_fit
+                            best_gen = gen[:]
+                            #print("M6 :", VRPGenome(best_gen).get_path(), best_fit)
+                            continue
+                    
+                    # M7 : If T(u) == T(v), replace (u;x) and (v;y) by (u;v) and (x;y)
+                    # M8 : If T(u) != T(v), replace (u;x) and (v;y) by (u;v) and (x;y)
+                    gen = best_gen[:]
+                    gen[x], gen[v] = gen[v], gen[x]
+                    current_fit = VRPGenome(gen).fitness
+                    if best_fit > current_fit:
+                        best_fit = current_fit
+                        best_gen = gen[:]
+                        #print("M7 :", VRPGenome(best_gen).get_path(), best_fit)
+                        continue
+                        
+                    # M9 : If T(u) != T(v), replace (u;x) and (v;y) by (u;y) and (x;v)
+                    if x != v and u != y:
+                        path = [x[:] for x in VRPGenome(best_gen).get_path()]
+                        Tu = -1
+                        Tv = -1
+                        for a in range(len(path)):
+                            if u in path[a]:
+                                Tu = a
+                            if v in path[a]:
+                                Tv = a
+                        if Tu != Tv:
+                            gen[x], gen[v], gen[y] = gen[y], gen[x], gen[v]
+                            current_fit = VRPGenome(gen).fitness
+                            if best_fit > current_fit:
+                                best_fit = current_fit
+                                best_gen = gen[:]
+                                #print("M9 :", VRPGenome(best_gen).get_path(), best_fit)
+                                continue
+                    break
+        return VRPGenome(best_gen)
+
     def selectParentsByTournament(self) -> list[VRPGenome]:
+        """Cette méthode renvoit 2 individus qui vont servir pour le crossover. 
+        Chaque individu est choisi par la méthode dite "du tournoi" : on 
+        choisit alétoirement 2 individus parmi toute la population et on 
+        retourne le meilleur. Idem pour le deuxième."""
         first = self.getRandElements(self.population, 2)
         second = self.getRandElements(self.population, 2)
 
         return [first[max(enumerate(first), key=lambda x: x[1].fitness)[0]], second[max(enumerate(second), key=lambda x: x[1].fitness)[0]]]
-  
-    # /**
-    #  * Retourne un enfant aléatoire provenant du croisement des parents
-    #  */
+
     def getRandomChild(self, parents: list[VRPGenome]) -> VRPGenome:
+        """Retourne un enfant aléatoire provenant du croisement des parents"""
         children = self.crossoverVrpTwoCuts(parents)
         return children[random.randint(0,1)]
-    
-  
-    # /**
-    #  * Retourne le meilleur enfant provenant du croisement des parents
-    #  */
+
     def getBestChild(self, parents: list[VRPGenome]) -> VRPGenome:
+        """Retourne le meilleur enfant provenant du croisement des parents"""
         children = self.crossoverVrpTwoCuts(parents)
         if children[0].fitness < children[1].fitness:
             return children[0]
         return children[1]
-    
 
     def tradingChildWithBadElement(self, child: VRPGenome) -> None:
         """On tente d'échanger l'enfant avec un mauvais individu (i.e. qui était 
@@ -313,7 +443,7 @@ class GeneticAlgorithmVRP:
         mutant = child
     
         if (random.random() < self.mutation_rate):
-            m = self.twoOpt(child)
+            m = self.localSearch(child)
             if (self.spaced(self.population, m, rank)):
                 mutant = m
             
@@ -326,7 +456,6 @@ class GeneticAlgorithmVRP:
             
             self.replaceAndSort(rank, mutant)
 
-
     def spaced(self, population: list[VRPGenome], individu: VRPGenome, skipped = None) -> bool:
         """Cette méthode renvoie vrai si element qu'on cherche à faire rentrer
         dans la population est assez espacé des autres solutions. Cela permet 
@@ -336,7 +465,6 @@ class GeneticAlgorithmVRP:
             if (pop != skipped) and (math.floor(population[pop].fitness/self.spacement) == math.floor(individu.fitness/self.spacement)):
                 return False
         return True
-  
 
     def partialReplacement(self) -> None:
         """Pour aider l'algo on remplace quelques mauvais individus par de nouveaux"""
@@ -363,7 +491,6 @@ class GeneticAlgorithmVRP:
                     self.replaceAndSort(-1, child)
                     self.unprod_iter = 0
 
-
     def replaceAndSort(self, rank: int, val: VRPGenome) -> None:
         """Permet de retirer un élément de la liste et de le remplacer
         par un autre mais au bon endroit. Petite optimisation permettant
@@ -374,21 +501,22 @@ class GeneticAlgorithmVRP:
         while (i < len(self.population) and self.population[i].fitness < val.fitness):
             i += 1
         self.population.insert(i, val)
-    
-  
+
     def optimizeVRP(self) -> VRPGenome:
         if not self.init():
             print('Problème init()')
             exit()
         
         if (self.genome_size - len(self.nonServis) <= 6):
-            print(self.twoOpt(self.clarkAndWright()).get_path())
+            print(self.localSearch(self.clarkAndWright()).get_path())
             exit()
         
         values = []
+        restarts = []
   
         self.generateRandomPop()
-        print("Start with : ", self.population[0].fitness)
+        print("All starting values : ", [round(x.fitness, 2) for x in self.population])
+        print("Best one : ", self.population[0].fitness)
         values.append(self.population[0].fitness)
       
         replacementDone = 0
@@ -398,6 +526,7 @@ class GeneticAlgorithmVRP:
             self.tradingChildWithBadElement(child)
     
             if (replacementDone < 5) and (self.unprod_iter == math.floor(self.max_unprod_iter / 4)):
+                restarts.append(len(values))
                 self.partialReplacement()
                 replacementDone += 1
 
@@ -407,19 +536,17 @@ class GeneticAlgorithmVRP:
         print(f'Solution finale : {round(self.population[0].fitness, 2)} mètres')
         print(f'Temps total :     {round((time.time() - self.start)*100)/100} secondes')
         print("------")
-        # v = list(set(values))
-        # v.sort(reverse=True)
-        # print("Valeurs différentes dans values : ", v)
 
-        # plt.plot(values)
-        # plt.ylabel('Meilleur genome')
-        # plt.xlabel('Iteration')
-        # plt.show()
+        plt.figure()
+        plt.plot(values)
+        plt.vlines(restarts, ymin=[values[x] - 25 for x in restarts], ymax=[values[x] + 25 for x in restarts], linestyles='dashed', colors='k')
+        plt.ylabel('Meilleur genome')
+        plt.xlabel('Iteration')
         return self.population[0]
 
 
 if __name__ == '__main__':
-    size = 20
+    size = 30
 
     # xs = [0] + [random.randint(-250, 250) for x in range(size)]
     # ys = [0] + [random.randint(-250, 250) for x in range(size)]
@@ -430,39 +557,40 @@ if __name__ == '__main__':
     # print(xs)
     # print(ys)
 
-    xs = [0, -25, 114, 17, -9, 53, 221, -131, 125, 69, 22, -240, 204, 145, -45, -121, -108, 53, 135, -215, -219]
-    ys = [0, 41, -72, 93, -139, -204, -201, -24, -118, -177, -101, -164, 223, 182, 120, 138, 89, 199, -73, -116, -182]
+    xs = [0, 102, 37, 25, -124, 217, 229, 155, -227, 129, -99, -62, 164, 239, 196, -167, 195, -4, 41, 99, -217, 246, 100, 96, 174, -89, -29, 136, -194, -91, -111]
+    ys = [0, -144, 246, 21, -122, -22, -178, -144, 199, -66, 83, 104, 38, -35, -211, 1, 70, 123, -96, -108, 115, -179, -169, 221, -72, 66, -124, 37, 235, 169, -185]
     matrix = [[math.sqrt((xs[x] - xs[y])**2 + (ys[x] - ys[y])**2) for x in range(len(xs))] for y in range(len(ys))]
     matrix_cst = [[0 for x in xs] for y in ys]
 
-    # fig, ax = plt.subplots()
-    # ax.scatter(x=xs, y=ys)
-    # for i in range(size + 1):
-    #     ax.annotate(i, (xs[i], ys[i]))
+    # g = VRPGenome([9, 5, 6, 7, 1, 4, 10, 8, 2, 3]) # 1763
+    # g = VRPGenome([x+1 for x in range(len(xs) - 1)])
+    # vrai = GeneticAlgorithmVRP()
+    # print("M0 :", g.get_path(), g.fitness)
+    # vrai.localSearch(g)
+    # print(vrai.twoOpt(g).fitness)
 
-    # plt.plot(0, 0, 'ro')
-    # plt.ylabel('Y')
-    # plt.xlabel('X')
 
     vrai = GeneticAlgorithmVRP()
     opt = vrai.optimizeVRP()
 
-    # for a in opt.get_path():
-    #     color = (random.random(), random.random(), random.random())
-    #     plt.plot([0, xs[a[0]]], [0, ys[a[0]]], c=color)
-    #     for b in range(len(a) -1):
-    #         plt.plot([xs[a[b]], xs[a[b+1]]], [ys[a[b]], ys[a[b+1]]], c=color)
-    #     plt.plot([0, xs[a[-1]]], [0, ys[a[-1]]], c=color)
+    fig, ax = plt.subplots()
+    ax.scatter(x=xs, y=ys)
+    for i in range(len(xs)):
+        ax.annotate(i, (xs[i], ys[i]))
 
-    # plt.title(f'{len(opt.get_path())} tournées : {opt.get_path()} (val = {round(opt.fitness, 2)})')
-    # plt.show()
-    
+    plt.plot(0, 0, 'ro')
+    plt.ylabel('Y')
+    plt.xlabel('X')
 
-    # start = time.time()
-    # vrai = GeneticAlgorithmVRP()
-    # vrai.optimizeVRP()
-    # print(f"Temps total : {round((time.time() - start)*100)/100} secondes")
-    # print()
+    for a in opt.get_path():
+        color = (random.random(), random.random(), random.random())
+        plt.plot([0, xs[a[0]]], [0, ys[a[0]]], c=color)
+        for b in range(len(a) -1):
+            plt.plot([xs[a[b]], xs[a[b+1]]], [ys[a[b]], ys[a[b+1]]], c=color)
+        plt.plot([0, xs[a[-1]]], [0, ys[a[-1]]], c=color)
+
+    plt.title(f'{len(opt.get_path())} tournées : {opt.get_path()} (val = {round(opt.fitness, 2)})')
+    plt.show()
 
     # with cProfile.Profile() as pr:
     #     start = time.time()
