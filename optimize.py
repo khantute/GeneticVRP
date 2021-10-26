@@ -15,7 +15,7 @@ max_points = 6
 
 class VRPGenome:
 
-    __slots__ = ['nb_pts', 'predecessors', 'genome', 'fitness']
+    #__slots__ = ['nb_pts', 'predecessors', 'genome', 'fitness']
 
     def __init__(self, genome: list[int] = None) -> None:
         self.nb_pts = len(matrix)
@@ -80,20 +80,22 @@ class GeneticAlgorithmVRP:
         self.population: list[VRPGenome] = []
         self.productive_iter = 0
         self.unprod_iter = 0
-        self.mutation_rate = 0.1
+        self.mutation_rate = 0.05
         self.pop_size = 30
-        self.max_prod_iter = 8000
-        self.max_unprod_iter = 700
-        self.spacement = 5
-        self.replacement = 8
+        self.max_prod_iter = 2000
+        self.max_unprod_iter = 500
+        self.spacement = .5
+        self.replaced = 8
+        self.replacement = 3
         self.genome_size = len(matrix) - 1
+        self.stats = [0]*8
+        self.nb_cross = 0
 
         # Solution
         self.tempsTotal = 0
         self.distanceTotale = 0
         self.tournees = []
         self.nonServis = []
-  
 
     def init(self) -> bool:
         """Prétraitement et initilisation.
@@ -124,15 +126,14 @@ class GeneticAlgorithmVRP:
         print("| Fitness CW :", clarke_wright.fitness)
         self.population.append(clarke_wright)
 
-        clarke_wright_bis = self.localSearch(self.clarkAndWrightBis())
-        print("| Fitness CW bis :", clarke_wright_bis.fitness)
-        self.population.append(clarke_wright_bis)
-
         # Il faudrait rajouter 2 autres heuristiques pour avoir une bonne population de départ.
 
         g = self.localSearch(self.greedy())
         self.population.append(g)
         print("| Fitness Greedy :", g.fitness)
+
+        self.population.append(self.localSearch(VRPGenome()))
+        self.population.append(self.localSearch(VRPGenome()))
 
         while (len(self.population) < self.pop_size):
             indiv = VRPGenome()
@@ -256,6 +257,7 @@ class GeneticAlgorithmVRP:
     def crossoverVrpTwoCuts(self, parents: list[VRPGenome]) -> list[VRPGenome]:
         """Meme principe que pour crossoverOneCut() mais avec deux points : i et j
         C1[i ... j] = P1[i ... j] puis complété par les valeurs de P2 circulairement à partir de j+1"""
+        self.nb_cross += 1
         break1 = random.randint(0, self.genome_size)
         break2 = break1 + random.randint(0, self.genome_size - break1)
         
@@ -319,6 +321,7 @@ class GeneticAlgorithmVRP:
                     if best_fit > current_fit:
                         best_fit = current_fit
                         best_gen = gen[:]
+                        self.stats[0] += 1
                         #print("M1 :", VRPGenome(best_gen).get_path(), best_fit)
                         continue
 
@@ -332,6 +335,7 @@ class GeneticAlgorithmVRP:
                     if best_fit > current_fit:
                         best_fit = current_fit
                         best_gen = gen[:]
+                        self.stats[1] += 1
                         #print("M2 :", VRPGenome(best_gen).get_path(), best_fit)
 
                     # M3 : If u and x are clients, remove them then insert (x;u) after v
@@ -344,6 +348,7 @@ class GeneticAlgorithmVRP:
                     if best_fit > current_fit:
                         best_fit = current_fit
                         best_gen = gen[:]
+                        self.stats[2] += 1
                         #print("M3 :", VRPGenome(best_gen).get_path(), best_fit)
                         continue
 
@@ -354,6 +359,7 @@ class GeneticAlgorithmVRP:
                     if best_fit > current_fit:
                         best_fit = current_fit
                         best_gen = gen[:]
+                        self.stats[3] += 1
                         #print("M4 :", VRPGenome(best_gen).get_path(), best_fit)
                         continue
 
@@ -366,7 +372,8 @@ class GeneticAlgorithmVRP:
                     if best_fit > current_fit:
                         best_fit = current_fit
                         best_gen = gen[:]
-                        #print("M5 :", VRPGenome(best_gen).get_path(), best_fit)
+                        self.stats[4] += 1
+                        # print("M5 :", VRPGenome(best_gen).get_path(), best_fit)
                         continue
 
                     # M6 : If (u;x) and (v;y) are clients, swap (u;x) and (v;y)
@@ -377,6 +384,7 @@ class GeneticAlgorithmVRP:
                         if best_fit > current_fit:
                             best_fit = current_fit
                             best_gen = gen[:]
+                            self.stats[5] += 1
                             #print("M6 :", VRPGenome(best_gen).get_path(), best_fit)
                             continue
                     
@@ -388,6 +396,7 @@ class GeneticAlgorithmVRP:
                     if best_fit > current_fit:
                         best_fit = current_fit
                         best_gen = gen[:]
+                        self.stats[6] += 1
                         #print("M7 :", VRPGenome(best_gen).get_path(), best_fit)
                         continue
                         
@@ -407,6 +416,7 @@ class GeneticAlgorithmVRP:
                             if best_fit > current_fit:
                                 best_fit = current_fit
                                 best_gen = gen[:]
+                                self.stats[7] += 1
                                 #print("M9 :", VRPGenome(best_gen).get_path(), best_fit)
                                 continue
                     break
@@ -470,7 +480,7 @@ class GeneticAlgorithmVRP:
         """Pour aider l'algo on remplace quelques mauvais individus par de nouveaux"""
         newPop: list[VRPGenome] = []
         # On genere une population bien espacée
-        while (len(newPop) < self.replacement):
+        while (len(newPop) < self.replaced):
             indiv = VRPGenome()
             if (self.spaced(self.population, indiv)):
                 newPop.append(indiv)
@@ -515,26 +525,30 @@ class GeneticAlgorithmVRP:
         restarts = []
   
         self.generateRandomPop()
-        print("All starting values : ", [round(x.fitness, 2) for x in self.population])
+        print("All starting values : ", [round(x.fitness) for x in self.population])
         print("Best one : ", self.population[0].fitness)
         values.append(self.population[0].fitness)
       
-        replacementDone = 0
+        replacement_done = 0
         while (self.productive_iter < self.max_prod_iter and self.unprod_iter < self.max_unprod_iter):
             parents = self.selectParentsByTournament()
             child = self.getRandomChild(parents)
             self.tradingChildWithBadElement(child)
     
-            if (replacementDone < 5) and (self.unprod_iter == math.floor(self.max_unprod_iter / 4)):
+            if (replacement_done < self.replacement) and (self.unprod_iter == math.floor(self.max_unprod_iter / 4)):
                 restarts.append(len(values))
                 self.partialReplacement()
-                replacementDone += 1
+                replacement_done += 1
 
             values.append(self.population[0].fitness)
+            update_progress((self.productive_iter + self.unprod_iter)/(self.max_prod_iter + self.max_unprod_iter), start_time=self.start)
 
-        print(f'Itérations :      {len(values)} ({self.productive_iter}/{self.unprod_iter})')
-        print(f'Solution finale : {round(self.population[0].fitness, 2)} mètres')
-        print(f'Temps total :     {round((time.time() - self.start)*100)/100} secondes')
+        update_progress(2)
+        print(f'Itérations :         {len(values)} ({self.productive_iter}/{self.unprod_iter})')
+        print(f'Solution finale :    {round(self.population[0].fitness, 2)} mètres')
+        print(f'Temps total :        {round((time.time() - self.start)*100)/100} secondes')
+        print(f'Local search stats : {self.stats}')
+        print(f'Nb OX :              {self.nb_cross}')
         print("------")
 
         plt.figure()
@@ -544,31 +558,49 @@ class GeneticAlgorithmVRP:
         plt.xlabel('Iteration')
         return self.population[0]
 
+def update_progress(progress, texte='Iterations', start_time=None):
+    barLength = 20 # Modify this to change the length of the progress bar
+    status = ""
+    if isinstance(progress, int):
+        progress = float(progress)
+    if not isinstance(progress, float):
+        progress = 0
+        status = "error: progress var must be float\r\n"
+    if progress < 0:
+        progress = 0
+        status = "Halt...\r\n"
+    if progress >= 1:
+        progress = 1
+        status = "Done...\r\n"
+    elif start_time is not None:
+        status = f'{round(time.time() - start_time)}s'
+    block = int(round(barLength*progress))
+    text = "{0} : [{1}] {2}% {3}\r".format(texte, "#"*block + "-"*(barLength-block), round(progress*100), status)
+    sys.stdout.write(text)
+    sys.stdout.flush()
 
 if __name__ == '__main__':
-    size = 30
+    size = 50
 
     # xs = [0] + [random.randint(-250, 250) for x in range(size)]
     # ys = [0] + [random.randint(-250, 250) for x in range(size)]
-    # matrix = [[math.sqrt(x*x + y*y) for x in xs] for y in ys]
-    # matrix_cst = [[0 for x in xs] for y in ys]
-    # print(matrix)
-    # print(matrix_cst)
     # print(xs)
     # print(ys)
 
-    xs = [0, 102, 37, 25, -124, 217, 229, 155, -227, 129, -99, -62, 164, 239, 196, -167, 195, -4, 41, 99, -217, 246, 100, 96, 174, -89, -29, 136, -194, -91, -111]
-    ys = [0, -144, 246, 21, -122, -22, -178, -144, 199, -66, 83, 104, 38, -35, -211, 1, 70, 123, -96, -108, 115, -179, -169, 221, -72, 66, -124, 37, 235, 169, -185]
+    # Pour 30 :
+    # xs = [0, 102, 37, 25, -124, 217, 229, 155, -227, 129, -99, -62, 164, 239, 196, -167, 195, -4, 41, 99, -217, 246, 100, 96, 174, -89, -29, 136, -194, -91, -111]
+    # ys = [0, -144, 246, 21, -122, -22, -178, -144, 199, -66, 83, 104, 38, -35, -211, 1, 70, 123, -96, -108, 115, -179, -169, 221, -72, 66, -124, 37, 235, 169, -185]
+    
+    # Pour 40
+    # xs = [0, -164, -74, 1, -211, -180, -102, -132, -174, -23, 161, 169, 199, 97, -93, -150, -14, 103, -63, 231, 249, -111, 83, 106, 46, -19, -241, 250, 214, -170, 147, 80, 23, 120, -189, -35, 5, 164, -162, -164, -121]
+    # ys = [0, 160, -142, -86, -133, 82, 137, -191, 211, -16, -143, -18, -163, -150, 157, 49, -133, -15, -50, 31, 228, -212, -148, -72, -152, -5, 250, 161, 1, -184, 121, -41, -138, -19, 51, 143, -81, 250, 59, -157, -79]
+    
+    # Pour 50 
+    xs = [0, 49, -167, -144, -175, -115, -71, 109, 30, 0, -211, 39, -171, -13, -95, -85, -36, 235, -184, -210, 155, 170, -200, -229, -90, 126, -86, -36, -99, 0, 47, -105, -50, -232, 204, -100, 92, 125, -209, -56, 121, 120, -228, -76, 112, 172, 33, 175, -136, 152, 92]
+    ys = [0, 164, 99, -231, -216, 100, -65, -123, -38, -74, 199, 65, -187, 200, -153, 180, -5, 31, 217, 108, -245, 19, -241, -206, 140, -97, 212, -161, -228, 135, -211, 153, -236, 218, -36, 145, 169, -230, -46, -250, -74, -163, -162, -242, -246, 63, -163, -63, 176, -237, -22]
+
     matrix = [[math.sqrt((xs[x] - xs[y])**2 + (ys[x] - ys[y])**2) for x in range(len(xs))] for y in range(len(ys))]
     matrix_cst = [[0 for x in xs] for y in ys]
-
-    # g = VRPGenome([9, 5, 6, 7, 1, 4, 10, 8, 2, 3]) # 1763
-    # g = VRPGenome([x+1 for x in range(len(xs) - 1)])
-    # vrai = GeneticAlgorithmVRP()
-    # print("M0 :", g.get_path(), g.fitness)
-    # vrai.localSearch(g)
-    # print(vrai.twoOpt(g).fitness)
-
 
     vrai = GeneticAlgorithmVRP()
     opt = vrai.optimizeVRP()
@@ -589,7 +621,7 @@ if __name__ == '__main__':
             plt.plot([xs[a[b]], xs[a[b+1]]], [ys[a[b]], ys[a[b+1]]], c=color)
         plt.plot([0, xs[a[-1]]], [0, ys[a[-1]]], c=color)
 
-    plt.title(f'{len(opt.get_path())} tournées : {opt.get_path()} (val = {round(opt.fitness, 2)})')
+    plt.title(f'{len(opt.get_path())} (val = {round(opt.fitness, 2)})')
     plt.show()
 
     # with cProfile.Profile() as pr:
