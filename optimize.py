@@ -15,6 +15,7 @@ max_points = 6
 
 class VRPGenome:
 
+    nb_split = 0
     __slots__ = ['nb_pts', 'predecessors', 'genome', 'fitness']
 
     def __init__(self, genome: list[int] = None) -> None:
@@ -29,21 +30,19 @@ class VRPGenome:
         return rand_genome
 
     def split(self) -> int:
+        VRPGenome.nb_split += 1
         values = [sys.maxsize]*self.nb_pts
         values[0] = 0
         for i in range(1, self.nb_pts):
-            constraint: int = 0
             cost = 0
             j = i
-            while (j < self.nb_pts) and (j-i+1 <= max_points) and (constraint <= upper_bound):
+            while (j-i+1 <= max_points) and (j < self.nb_pts):
                 if (i == j):
-                    constraint = matrix_cst[0][self.genome[j-1]] + matrix_cst[self.genome[j-1]][0]
                     cost = matrix[0][self.genome[j-1]] + matrix[self.genome[j-1]][0]
                 else:
                     cost += - matrix[self.genome[j-2]][0] + matrix[self.genome[j-2]][self.genome[j-1]] + matrix[self.genome[j-1]][0]
-                    constraint += - matrix_cst[self.genome[j-2]][0] + matrix_cst[self.genome[j-2]][self.genome[j-1]] + matrix_cst[self.genome[j-1]][0]
-
-                if (j-i+1 <= max_points) and (constraint <= upper_bound):
+                    
+                if (j-i+1 <= max_points):
                     if (values[i-1] + cost < values[j]):
                         values[j] = values[i-1] + cost
                         self.predecessors[j] = i-1
@@ -66,6 +65,25 @@ class VRPGenome:
             j = i
         return tournees
 
+    def plot(self, xs, ys):
+        fig, ax = plt.subplots()
+        ax.scatter(x=xs, y=ys)
+        for i in range(len(xs)):
+            ax.annotate(i, (xs[i], ys[i]))
+
+        plt.plot(0, 0, 'ro')
+        plt.ylabel('Y')
+        plt.xlabel('X')
+
+        for a in self.get_path():
+            color = (random.random(), random.random(), random.random())
+            plt.plot([0, xs[a[0]]], [0, ys[a[0]]], c=color)
+            for b in range(len(a) -1):
+                plt.plot([xs[a[b]], xs[a[b+1]]], [ys[a[b]], ys[a[b+1]]], c=color)
+            plt.plot([0, xs[a[-1]]], [0, ys[a[-1]]], c=color)
+
+        plt.title(f'Opt = {round(opt.fitness, 2)}')
+
 class GeneticAlgorithmVRP:
     """Cet algo permet de trouver une solution au problème de VRP (Vehicle
     Routing Problem) qui consiste à trouver les meilleures tournées de
@@ -82,12 +100,13 @@ class GeneticAlgorithmVRP:
         self.unprod_iter = 0
         self.mutation_rate = 0.05
         self.pop_size = 30
-        self.max_prod_iter = 2000
-        self.max_unprod_iter = 500
+        self.max_prod_iter = 3000 #2000
+        self.max_unprod_iter = 500 #500
         self.spacement = .5
         self.replaced = 8
         self.replacement = 3
         self.genome_size = len(matrix) - 1
+
         self.stats = [0]*8
         self.nb_cross = 0
 
@@ -122,18 +141,15 @@ class GeneticAlgorithmVRP:
         """Crée une population initiale aléatoire. On essaie d'utiliser des heuristiques
         pour avoir des solutions correctes dès le début."""
 
-        clarke_wright = self.localSearch(self.clarkAndWright())
-        print("| Fitness CW :", clarke_wright.fitness)
+        clarke_wright = self.clarkAndWright()
+        print("| Fitness CW :      ", clarke_wright.fitness)
         self.population.append(clarke_wright)
 
         # Il faudrait rajouter 2 autres heuristiques pour avoir une bonne population de départ.
 
         g = self.localSearch(self.greedy())
         self.population.append(g)
-        print("| Fitness Greedy :", g.fitness)
-
-        self.population.append(self.localSearch(VRPGenome()))
-        self.population.append(self.localSearch(VRPGenome()))
+        print("| Fitness Greedy :  ", g.fitness)
 
         while (len(self.population) < self.pop_size):
             indiv = VRPGenome()
@@ -549,9 +565,11 @@ class GeneticAlgorithmVRP:
         print(f'Itérations :         {len(values)} ({self.productive_iter}/{self.unprod_iter})')
         print(f'Solution finale :    {round(self.population[0].fitness, 2)} mètres')
         print(f'Temps total :        {round((time.time() - self.start)*100)/100} secondes')
-        print(f'Local search stats : {self.stats}')
+        nb_local_s = sum(x for x in self.stats)
+        print(f'Local search stats : {[round(x/nb_local_s*100) for x in self.stats]}% (tot : {nb_local_s})')
         print(f'Nb OX :              {self.nb_cross}')
-        print("------")
+        print(f'Nb split :           {VRPGenome.nb_split}')
+        print("---------------------")
 
         plt.figure()
         plt.plot(values)
@@ -590,12 +608,12 @@ if __name__ == '__main__':
     # print(ys)
 
     # Pour 30 :
-    xs = [0, 102, 37, 25, -124, 217, 229, 155, -227, 129, -99, -62, 164, 239, 196, -167, 195, -4, 41, 99, -217, 246, 100, 96, 174, -89, -29, 136, -194, -91, -111]
-    ys = [0, -144, 246, 21, -122, -22, -178, -144, 199, -66, 83, 104, 38, -35, -211, 1, 70, 123, -96, -108, 115, -179, -169, 221, -72, 66, -124, 37, 235, 169, -185]
+    # xs = [0, 102, 37, 25, -124, 217, 229, 155, -227, 129, -99, -62, 164, 239, 196, -167, 195, -4, 41, 99, -217, 246, 100, 96, 174, -89, -29, 136, -194, -91, -111]
+    # ys = [0, -144, 246, 21, -122, -22, -178, -144, 199, -66, 83, 104, 38, -35, -211, 1, 70, 123, -96, -108, 115, -179, -169, 221, -72, 66, -124, 37, 235, 169, -185]
     
     # Pour 40
-    # xs = [0, -164, -74, 1, -211, -180, -102, -132, -174, -23, 161, 169, 199, 97, -93, -150, -14, 103, -63, 231, 249, -111, 83, 106, 46, -19, -241, 250, 214, -170, 147, 80, 23, 120, -189, -35, 5, 164, -162, -164, -121]
-    # ys = [0, 160, -142, -86, -133, 82, 137, -191, 211, -16, -143, -18, -163, -150, 157, 49, -133, -15, -50, 31, 228, -212, -148, -72, -152, -5, 250, 161, 1, -184, 121, -41, -138, -19, 51, 143, -81, 250, 59, -157, -79]
+    xs = [0, -164, -74, 1, -211, -180, -102, -132, -174, -23, 161, 169, 199, 97, -93, -150, -14, 103, -63, 231, 249, -111, 83, 106, 46, -19, -241, 250, 214, -170, 147, 80, 23, 120, -189, -35, 5, 164, -162, -164, -121]
+    ys = [0, 160, -142, -86, -133, 82, 137, -191, 211, -16, -143, -18, -163, -150, 157, 49, -133, -15, -50, 31, 228, -212, -148, -72, -152, -5, 250, 161, 1, -184, 121, -41, -138, -19, 51, 143, -81, 250, 59, -157, -79]
     
     # Pour 50 
     # xs = [0, 49, -167, -144, -175, -115, -71, 109, 30, 0, -211, 39, -171, -13, -95, -85, -36, 235, -184, -210, 155, 170, -200, -229, -90, 126, -86, -36, -99, 0, 47, -105, -50, -232, 204, -100, 92, 125, -209, -56, 121, 120, -228, -76, 112, 172, 33, 175, -136, 152, 92]
@@ -606,24 +624,8 @@ if __name__ == '__main__':
 
     vrai = GeneticAlgorithmVRP()
     opt = vrai.optimizeVRP()
+    opt.plot(xs, ys)
 
-    fig, ax = plt.subplots()
-    ax.scatter(x=xs, y=ys)
-    for i in range(len(xs)):
-        ax.annotate(i, (xs[i], ys[i]))
-
-    plt.plot(0, 0, 'ro')
-    plt.ylabel('Y')
-    plt.xlabel('X')
-
-    for a in opt.get_path():
-        color = (random.random(), random.random(), random.random())
-        plt.plot([0, xs[a[0]]], [0, ys[a[0]]], c=color)
-        for b in range(len(a) -1):
-            plt.plot([xs[a[b]], xs[a[b+1]]], [ys[a[b]], ys[a[b+1]]], c=color)
-        plt.plot([0, xs[a[-1]]], [0, ys[a[-1]]], c=color)
-
-    plt.title(f'{len(opt.get_path())} (val = {round(opt.fitness, 2)})')
     plt.show()
 
     # with cProfile.Profile() as pr:
